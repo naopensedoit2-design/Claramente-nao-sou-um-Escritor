@@ -244,7 +244,10 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
     }
   });
 
-  await seedDatabase();
+  // Fire-and-forget seed — does not block route registration
+  seedDatabase().catch((err) =>
+    console.warn("DB seed skipped (DB may not be configured yet):", err.message)
+  );
   return httpServer;
 }
 
