@@ -216,53 +216,64 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
         return templates[Math.floor(Math.random() * templates.length)];
       }
 
+      // Alternativa 100% Gratuita caso as chaves falhem
+      async function callPollinations(promptText: string) {
+        console.log("Iniciando alternativa gratuita (Pollinations)...");
+        const response = await fetch("https://text.pollinations.ai/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: promptText }
+            ]
+          })
+        });
+        if (!response.ok) throw new Error(`Pollinations falhou: ${response.status}`);
+        return await response.text();
+      }
+
       async function callGeminiDirect(payloadContents: any) {
         const key = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
         if (!key) throw new Error("Chave Gemini não encontrada");
 
-        // Dynamic Model Discovery (Solução Suprema)
-        try {
-          console.log("Descobrindo modelos disponíveis para esta chave...");
-          const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
-          if (listRes.ok) {
-            const listData = await listRes.json();
-            const availableModels = listData.models
-              .filter((m: any) => m.supportedGenerationMethods.includes("generateContent"))
-              .map((m: any) => m.name); // Ex: 'models/gemini-1.5-flash'
-            
-            console.log("Modelos descobertos:", availableModels.join(", "));
-            
-            // Prioriza flash ou pro, se não, pega o primeiro
-            let chosenModel = availableModels.find((m: string) => m.includes("1.5-flash")) || 
-                              availableModels.find((m: string) => m.includes("pro")) || 
-                              availableModels[0];
+        // Dynamic Model Discovery
+        console.log("Descobrindo modelos disponíveis para esta chave...");
+        const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+        if (!listRes.ok) throw new Error(`Falha ao listar modelos: HTTP ${listRes.status}`);
+        
+        const listData = await listRes.json();
+        const availableModels = listData.models
+          .filter((m: any) => m.supportedGenerationMethods.includes("generateContent"))
+          .map((m: any) => m.name); 
+        
+        // CORREÇÃO CRÍTICA: Os modelos 'pro' dão erro 429 muito fácil na conta gratuita (limite baixo).
+        // Vamos forçar o uso do modelo 'flash' que tem limites gigantes gratuitos.
+        let chosenModel = availableModels.find((m: string) => m === "models/gemini-flash-latest") ||
+                          availableModels.find((m: string) => m === "models/gemini-2.5-flash") ||
+                          availableModels.find((m: string) => m === "models/gemini-2.0-flash") ||
+                          availableModels.find((m: string) => m.includes("flash") && !m.includes("preview") && !m.includes("lite")) || 
+                          availableModels.find((m: string) => m.includes("flash")) ||
+                          availableModels[0];
 
-            if (chosenModel) {
-              const dynamicUrl = `https://generativelanguage.googleapis.com/v1beta/${chosenModel}:generateContent?key=${key}`;
-              console.log("Jarbas tentando chamada dinâmica:", dynamicUrl);
-              const response = await fetch(dynamicUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contents: payloadContents })
-              });
+        if (!chosenModel) throw new Error("Nenhum modelo suporta generateContent!");
 
-              if (response.ok) {
-                const data = await response.json();
-                return data.candidates[0].content.parts[0].text;
-              } else {
-                console.warn(`Tentativa dinâmica falhou: HTTP ${response.status}`);
-              }
-            } else {
-               console.warn("Nenhum modelo suporta generateContent!");
-            }
-          } else {
-            console.warn(`Falha ao listar modelos: HTTP ${listRes.status}`);
-          }
-        } catch (e) {
-          console.log("Erro na descoberta de modelos:", e.message);
+        const dynamicUrl = `https://generativelanguage.googleapis.com/v1beta/${chosenModel}:generateContent?key=${key}`;
+        console.log("Jarbas tentando chamada dinâmica:", dynamicUrl);
+        
+        const response = await fetch(dynamicUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents: payloadContents })
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errText}`);
         }
 
-        throw new Error("Nenhum modelo compatível foi encontrado para a sua chave.");
+        const data = await response.json();
+        return data.candidates[0].content.parts[0].text;
       }
 
       let suggestion;
@@ -306,10 +317,18 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
 
         res.json({ suggestion });
       } catch (err) {
-        console.error("Jarbas falhou, usando gerador de emergência:", err.message);
-        // O Jarbas de emergência garante que o usuário SEMPRE tenha um texto
-        suggestion = generateEmergencySuggestion(title);
-        res.json({ suggestion });
+        console.error("Jarbas (Gemini) falhou. Tentando alternativa 100% gratuita (Pollinations):", err.message);
+        
+        try {
+          // Se o Gemini falhar (ex: Erro 429 Cota Excedida), usamos o Pollinations que não exige chave
+          suggestion = await callPollinations(isEmpty ? (title ? `Escreva uma crônica sobre "${title}"` : "Escreva uma crônica criativa") : `Reescreva e melhore: ${content}`);
+          res.json({ suggestion });
+        } catch (pollinationsErr) {
+           console.error("Até a alternativa gratuita falhou:", pollinationsErr.message);
+           // Último recurso absoluto
+           suggestion = generateEmergencySuggestion(title);
+           res.json({ suggestion });
+        }
       }
     } catch (err) {
       console.error("AI Suggestion error:", err);
