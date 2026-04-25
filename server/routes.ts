@@ -221,6 +221,7 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
         if (!key) throw new Error("Chave Gemini não encontrada");
 
         const urls = [
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${key}`,
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
           `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${key}`,
           `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${key}`
