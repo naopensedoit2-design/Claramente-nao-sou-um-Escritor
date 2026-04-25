@@ -30,3 +30,5 @@ export type CreatePostRequest = InsertPost;
 export type UpdatePostRequest = Partial<InsertPost>;
 
 export type PostResponse = Post;
+
+export * from "./models/chat";
