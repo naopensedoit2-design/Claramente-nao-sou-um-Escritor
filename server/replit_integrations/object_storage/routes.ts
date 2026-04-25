@@ -1,59 +1,37 @@
 import type { Express } from "express";
-import { ObjectStorageService, ObjectNotFoundError } from "./objectStorage";
+import { randomUUID } from "crypto";
+import { db } from "../../db";
+import { assets } from "../../../shared/schema";
+import { eq } from "drizzle-orm";
+import multer from "multer";
 
-/**
- * Register object storage routes for file uploads.
- *
- * This provides example routes for the presigned URL upload flow:
- * 1. POST /api/uploads/request-url - Get a presigned URL for uploading
- * 2. The client then uploads directly to the presigned URL
- *
- * IMPORTANT: These are example routes. Customize based on your use case:
- * - Add authentication middleware for protected uploads
- * - Add file metadata storage (save to database after upload)
- * - Add ACL policies for access control
- */
+const upload = multer({ 
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit for DB storage
+});
+
 export function registerObjectStorageRoutes(app: Express): void {
-  const objectStorageService = new ObjectStorageService();
-
   /**
-   * Request a presigned URL for file upload.
-   *
-   * Request body (JSON):
-   * {
-   *   "name": "filename.jpg",
-   *   "size": 12345,
-   *   "contentType": "image/jpeg"
-   * }
-   *
-   * Response:
-   * {
-   *   "uploadURL": "https://storage.googleapis.com/...",
-   *   "objectPath": "/objects/uploads/uuid"
-   * }
-   *
-   * IMPORTANT: The client should NOT send the file to this endpoint.
-   * Send JSON metadata only, then upload the file directly to uploadURL.
+   * Request a URL for file upload.
+   * On Vercel, we return a local API URL that will handle the binary upload.
    */
   app.post("/api/uploads/request-url", async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
 
       if (!name) {
-        return res.status(400).json({
-          error: "Missing required field: name",
-        });
+        return res.status(400).json({ error: "Missing required field: name" });
       }
 
-      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
-
-      // Extract object path from the presigned URL for later reference
-      const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
+      const objectId = randomUUID();
+      // On Vercel, we point the upload URL to our own binary handler
+      const protocol = req.headers['x-forwarded-proto'] || 'http';
+      const host = req.headers.host;
+      const uploadURL = `${protocol}://${host}/api/uploads/binary/${objectId}?contentType=${encodeURIComponent(contentType || 'application/octet-stream')}`;
+      const objectPath = `/objects/${objectId}`;
 
       res.json({
         uploadURL,
         objectPath,
-        // Echo back the metadata for client convenience
         metadata: { name, size, contentType },
       });
     } catch (error) {
@@ -63,24 +41,66 @@ export function registerObjectStorageRoutes(app: Express): void {
   });
 
   /**
-   * Serve uploaded objects.
-   *
-   * GET /objects/:objectPath(*)
-   *
-   * This serves files from object storage. For public files, no auth needed.
-   * For protected files, add authentication middleware and ACL checks.
+   * Handle the binary upload and save to Database.
+   * Uppy uses PUT by default for the presigned URL flow.
    */
-  app.get("/objects/:objectPath(*)", async (req, res) => {
+  app.put("/api/uploads/binary/:id", upload.single("file"), async (req, res) => {
     try {
-      const objectFile = await objectStorageService.getObjectEntityFile(req.path);
-      await objectStorageService.downloadObject(objectFile, res);
+      const { id } = req.params;
+      const contentType = req.query.contentType as string || "application/octet-stream";
+      
+      // If multer didn't pick it up as 'file' (standard PUT), we read raw body
+      let buffer: Buffer;
+      if (req.file) {
+        buffer = req.file.buffer;
+      } else {
+        // Handle raw PUT body
+        const chunks: any[] = [];
+        for await (const chunk of req) {
+          chunks.push(chunk);
+        }
+        buffer = Buffer.concat(chunks);
+      }
+
+      const base64Content = buffer.toString("base64");
+
+      await db.insert(assets).values({
+        id,
+        contentType,
+        content: base64Content,
+      });
+
+      res.json({ success: true, objectPath: `/objects/${id}` });
     } catch (error) {
-      console.error("Error serving object:", error);
-      if (error instanceof ObjectNotFoundError) {
+      console.error("Error saving binary upload:", error);
+      res.status(500).json({ error: "Failed to save upload" });
+    }
+  });
+
+  /**
+   * Serve uploaded objects from the Database.
+   */
+  app.get("/objects/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const [asset] = await db.select().from(assets).where(eq(assets.id, id));
+
+      if (!asset) {
         return res.status(404).json({ error: "Object not found" });
       }
-      return res.status(500).json({ error: "Failed to serve object" });
+
+      const buffer = Buffer.from(asset.content, "base64");
+      
+      res.set({
+        "Content-Type": asset.contentType,
+        "Content-Length": buffer.length,
+        "Cache-Control": "public, max-age=31536000",
+      });
+
+      res.send(buffer);
+    } catch (error) {
+      console.error("Error serving object:", error);
+      res.status(500).json({ error: "Failed to serve object" });
     }
   });
 }
-

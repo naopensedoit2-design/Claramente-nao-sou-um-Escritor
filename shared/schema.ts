@@ -32,3 +32,10 @@ export type UpdatePostRequest = Partial<InsertPost>;
 export type PostResponse = Post;
 
 export * from "./models/chat";
+
+export const assets = pgTable("assets", {
+  id: text("id").primaryKey(),
+  contentType: text("content_type").notNull(),
+  content: text("content").notNull(), // Base64 content
+  createdAt: timestamp("created_at").defaultNow(),
+});
