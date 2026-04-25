@@ -4,8 +4,12 @@
   "outputDirectory": "dist/public",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
       "source": "/objects/(.*)",
-      "destination": "/api/objects/$1"
+      "destination": "/api/index"
     },
     {
       "source": "/((?!api|objects|assets).*)",
