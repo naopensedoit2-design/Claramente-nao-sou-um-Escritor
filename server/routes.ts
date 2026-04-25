@@ -18,7 +18,7 @@ const openai = new OpenAI({
 });
 
 const genAI = new GoogleGenerativeAI(process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "");
-const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: "v1" });
 
 const SessionStore = MemoryStore(session);
 const PgSession = connectPgSimple(session);
