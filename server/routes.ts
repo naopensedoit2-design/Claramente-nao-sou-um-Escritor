@@ -15,11 +15,10 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
 const genAI = new GoogleGenerativeAI(process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "");
-const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL });
+const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const SessionStore = MemoryStore(session);
 const PgSession = connectPgSimple(session);
