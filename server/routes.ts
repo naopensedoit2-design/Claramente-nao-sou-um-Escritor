@@ -18,7 +18,7 @@ const openai = new OpenAI({
 });
 
 const genAI = new GoogleGenerativeAI(process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "");
-const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { apiVersion: "v1" });
+const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 const SessionStore = MemoryStore(session);
 const PgSession = connectPgSimple(session);
@@ -212,19 +212,26 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
           fullImageUrl = `${protocol}://${req.get('host')}${coverImageUrl}`;
         }
         
-        // Fetch image to send to Gemini
-        const imgRes = await fetch(fullImageUrl);
-        const imgBuffer = await imgRes.arrayBuffer();
-        
-        result = await geminiModel.generateContent([
-          { text: prompt },
-          {
-            inlineData: {
-              data: Buffer.from(imgBuffer).toString("base64"),
-              mimeType: imgRes.headers.get("content-type") || "image/jpeg",
+        try {
+          // Fetch image to send to Gemini
+          const imgRes = await fetch(fullImageUrl);
+          const imgBuffer = await imgRes.arrayBuffer();
+          
+          // Use vision model for images
+          const visionModel = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
+          result = await visionModel.generateContent([
+            { text: prompt },
+            {
+              inlineData: {
+                data: Buffer.from(imgBuffer).toString("base64"),
+                mimeType: imgRes.headers.get("content-type") || "image/jpeg",
+              },
             },
-          },
-        ]);
+          ]);
+        } catch (visionErr) {
+          console.warn("Vision model failed, falling back to text-only:", visionErr.message);
+          result = await geminiModel.generateContent(prompt);
+        }
       } else {
         result = await geminiModel.generateContent(prompt);
       }
