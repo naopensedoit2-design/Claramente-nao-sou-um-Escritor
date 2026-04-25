@@ -17,7 +17,7 @@ const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
 });
 
-const genAI = new GoogleGenerativeAI(process.env.AI_INTEGRATIONS_GEMINI_API_KEY || "");
+const genAI = new GoogleGenerativeAI(process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY || "");
 const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
 
 const SessionStore = MemoryStore(session);
@@ -204,6 +204,25 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
 
       const prompt = `${systemPrompt}\n\n${isEmpty ? (title ? `Crie uma crônica original baseada no título: "${title}"` : "Crie uma crônica original.") : `Reescreva e melhore esta crônica seguindo seu estilo: ${content}`}`;
 
+      // Funçao de tentativa com múltiplos modelos (Practical Fallback)
+      async function generateWithFallback(contentPayload: any) {
+        const models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
+        let lastError: any;
+
+        for (const modelName of models) {
+          try {
+            console.log(`Jarbas tentando modelo: ${modelName}...`);
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(contentPayload);
+            return result;
+          } catch (err) {
+            console.warn(`Modelo ${modelName} falhou:`, err.message);
+            lastError = err;
+          }
+        }
+        throw lastError;
+      }
+
       let result;
       if (coverImageUrl && isEmpty) {
         let fullImageUrl = coverImageUrl;
@@ -213,13 +232,10 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
         }
         
         try {
-          // Fetch image to send to Gemini
           const imgRes = await fetch(fullImageUrl);
           const imgBuffer = await imgRes.arrayBuffer();
           
-          // Use vision model for images
-          const visionModel = genAI.getGenerativeModel({ model: "gemini-pro-vision" });
-          result = await visionModel.generateContent([
+          result = await generateWithFallback([
             { text: prompt },
             {
               inlineData: {
@@ -229,11 +245,11 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
             },
           ]);
         } catch (visionErr) {
-          console.warn("Vision model failed, falling back to text-only:", visionErr.message);
-          result = await geminiModel.generateContent(prompt);
+          console.warn("Jarbas falhou na visão, tentando apenas texto:", visionErr.message);
+          result = await generateWithFallback(prompt);
         }
       } else {
-        result = await geminiModel.generateContent(prompt);
+        result = await generateWithFallback(prompt);
       }
 
       res.json({ suggestion: result.response.text() });
