@@ -203,43 +203,34 @@ PROIBIÇÕES:
 
 Retorne APENAS o texto final. Sem comentários ou metadados.`;
 
-      const messages: any[] = [
-        { role: "system", content: systemPrompt }
-      ];
+      const prompt = `${systemPrompt}\n\n${isEmpty ? (title ? `Crie uma crônica original baseada no título: "${title}"` : "Crie uma crônica original.") : `Reescreva e melhore esta crônica seguindo seu estilo: ${content}`}`;
 
-      if (isEmpty) {
-        let userPrompt = "Crie uma crônica original.";
-        if (title) userPrompt = `Crie uma crônica original baseada no título: "${title}"`;
-        
-        if (coverImageUrl) {
-          let fullImageUrl = coverImageUrl;
-          if (!coverImageUrl.startsWith('http')) {
-            fullImageUrl = `${req.protocol}://${req.get('host')}${coverImageUrl}`;
-          }
-          messages.push({
-            role: "user",
-            content: [
-              { type: "text", text: userPrompt },
-              { type: "image_url", image_url: { url: fullImageUrl } }
-            ]
-          });
-        } else {
-          messages.push({ role: "user", content: userPrompt });
+      let result;
+      if (coverImageUrl && isEmpty) {
+        let fullImageUrl = coverImageUrl;
+        if (!coverImageUrl.startsWith('http')) {
+          const protocol = req.headers['x-forwarded-proto'] || 'http';
+          fullImageUrl = `${protocol}://${req.get('host')}${coverImageUrl}`;
         }
+        
+        // Fetch image to send to Gemini
+        const imgRes = await fetch(fullImageUrl);
+        const imgBuffer = await imgRes.arrayBuffer();
+        
+        result = await geminiModel.generateContent([
+          { text: prompt },
+          {
+            inlineData: {
+              data: Buffer.from(imgBuffer).toString("base64"),
+              mimeType: imgRes.headers.get("content-type") || "image/jpeg",
+            },
+          },
+        ]);
       } else {
-        messages.push({
-          role: "user",
-          content: `Reescreva e melhore esta crônica seguindo seu estilo: ${content}`
-        });
+        result = await geminiModel.generateContent(prompt);
       }
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages,
-        max_tokens: 1000,
-      });
-
-      res.json({ suggestion: response.choices[0].message.content });
+      res.json({ suggestion: result.response.text() });
     } catch (err) {
       console.error("AI Suggestion error:", err);
       res.status(500).json({ message: "Failed to generate AI suggestion" });
