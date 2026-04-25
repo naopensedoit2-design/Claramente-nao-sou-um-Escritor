@@ -25,26 +25,39 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 });
 
 const httpServer = createServer(app);
+let initPromise: Promise<any> | null = null;
 let initError: any = null;
 
-try {
-  // Synchronous run, errors will be caught if it strictly throws
-  registerRoutes(httpServer, app).catch((err) => {
-    console.error("Failed to register routes async:", err);
+function initialize() {
+  if (initPromise) return initPromise;
+  
+  initPromise = registerRoutes(httpServer, app).catch((err) => {
+    console.error("Failed to register routes:", err);
     initError = err;
+    throw err;
   });
-} catch (err) {
-  console.error("Failed to register routes sync:", err);
-  initError = err;
+  
+  return initPromise;
 }
 
+// Global error handler for the app
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
   res.status(status).json({ message, stack: err.stack });
 });
 
-export default function (req: Request, res: Response) {
+export default async function (req: Request, res: Response) {
+  try {
+    await initialize();
+  } catch (err) {
+    return res.status(500).json({
+      error: "Initialization error",
+      message: err.message,
+      stack: err.stack
+    });
+  }
+
   if (initError) {
     return res.status(500).json({
       error: "Initialization error",
@@ -52,6 +65,7 @@ export default function (req: Request, res: Response) {
       stack: initError.stack
     });
   }
+
   return app(req, res);
 }
 

@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
-import * as schema from "@shared/schema";
+import * as schema from "../shared/schema";
 
 const { Pool } = pg;
 
@@ -10,7 +10,7 @@ const { Pool } = pg;
 let _pool: InstanceType<typeof Pool> | null = null;
 let _db: ReturnType<typeof drizzle> | null = null;
 
-function getPool() {
+export function getPool() {
   if (!_pool) {
     if (!process.env.DATABASE_URL) {
       throw new Error(
