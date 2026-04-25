@@ -220,36 +220,49 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
         const key = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
         if (!key) throw new Error("Chave Gemini não encontrada");
 
-        const urls = [
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${key}`,
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
-          `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${key}`,
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${key}`
-        ];
+        // Dynamic Model Discovery (Solução Suprema)
+        try {
+          console.log("Descobrindo modelos disponíveis para esta chave...");
+          const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+          if (listRes.ok) {
+            const listData = await listRes.json();
+            const availableModels = listData.models
+              .filter((m: any) => m.supportedGenerationMethods.includes("generateContent"))
+              .map((m: any) => m.name); // Ex: 'models/gemini-1.5-flash'
+            
+            console.log("Modelos descobertos:", availableModels.join(", "));
+            
+            // Prioriza flash ou pro, se não, pega o primeiro
+            let chosenModel = availableModels.find((m: string) => m.includes("1.5-flash")) || 
+                              availableModels.find((m: string) => m.includes("pro")) || 
+                              availableModels[0];
 
-        let lastErr;
-        for (const url of urls) {
-          try {
-            console.log(`Jarbas tentando chamada direta: ${url.split('/models/')[1].split(':')[0]}...`);
-            const response = await fetch(url, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ contents: payloadContents })
-            });
+            if (chosenModel) {
+              const dynamicUrl = `https://generativelanguage.googleapis.com/v1beta/${chosenModel}:generateContent?key=${key}`;
+              console.log("Jarbas tentando chamada dinâmica:", dynamicUrl);
+              const response = await fetch(dynamicUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ contents: payloadContents })
+              });
 
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`HTTP ${response.status}: ${errText}`);
+              if (response.ok) {
+                const data = await response.json();
+                return data.candidates[0].content.parts[0].text;
+              } else {
+                console.warn(`Tentativa dinâmica falhou: HTTP ${response.status}`);
+              }
+            } else {
+               console.warn("Nenhum modelo suporta generateContent!");
             }
-
-            const data = await response.json();
-            return data.candidates[0].content.parts[0].text;
-          } catch (err) {
-            console.warn(`Tentativa falhou: ${err.message}`);
-            lastErr = err;
+          } else {
+            console.warn(`Falha ao listar modelos: HTTP ${listRes.status}`);
           }
+        } catch (e) {
+          console.log("Erro na descoberta de modelos:", e.message);
         }
-        throw lastErr;
+
+        throw new Error("Nenhum modelo compatível foi encontrado para a sua chave.");
       }
 
       let suggestion;
