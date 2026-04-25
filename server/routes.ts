@@ -143,6 +143,8 @@ export async function registerRoutes(
     const { password } = req.body;
     const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
     
+    console.log(`Login attempt with password: ${password === adminPassword ? "CORRECT" : "INCORRECT"}`);
+
     if (password === adminPassword) {
       (req.session as any).isAuthenticated = true;
       res.json({ success: true });
