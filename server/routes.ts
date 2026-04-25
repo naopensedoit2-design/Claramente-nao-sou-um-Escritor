@@ -5,6 +5,8 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import session from "express-session";
 import MemoryStore from "memorystore";
+import connectPgSimple from "connect-pg-simple";
+import { pool } from "./db";
 import OpenAI from "openai";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import multer from "multer";
@@ -12,7 +14,7 @@ import fs from "fs";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
@@ -20,6 +22,7 @@ const genAI = new GoogleGenerativeAI(process.env.AI_INTEGRATIONS_GEMINI_API_KEY 
 const geminiModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }, { baseUrl: process.env.AI_INTEGRATIONS_GEMINI_BASE_URL });
 
 const SessionStore = MemoryStore(session);
+const PgSession = connectPgSimple(session);
 const upload = multer({ dest: "/tmp/uploads/" });
 
 export async function registerRoutes(
@@ -27,12 +30,19 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   // 1. Session Middleware (Must be registered first)
+  const isProduction = process.env.NODE_ENV === "production";
+  const sessionStore = isProduction
+    ? new PgSession({ pool, createTableIfMissing: true })
+    : new SessionStore({ checkPeriod: 86400000 });
+
   app.use(
     session({
-      cookie: { maxAge: 86400000 },
-      store: new SessionStore({
-        checkPeriod: 86400000,
-      }),
+      cookie: {
+        maxAge: 86400000,
+        secure: isProduction,
+        sameSite: isProduction ? "none" : "lax",
+      },
+      store: sessionStore,
       resave: false,
       saveUninitialized: false,
       secret: process.env.SESSION_SECRET || "secret_key",
