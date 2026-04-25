@@ -4,6 +4,7 @@ import { createServer } from "http";
 import { registerRoutes } from "../server/routes";
 
 const app = express();
+app.set("trust proxy", 1);
 
 app.use(
   express.json({

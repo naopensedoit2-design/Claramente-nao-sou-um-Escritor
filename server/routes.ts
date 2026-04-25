@@ -40,7 +40,7 @@ export async function registerRoutes(
       cookie: {
         maxAge: 86400000,
         secure: isProduction,
-        sameSite: isProduction ? "none" : "lax",
+        sameSite: "lax",
       },
       store: sessionStore,
       resave: false,
