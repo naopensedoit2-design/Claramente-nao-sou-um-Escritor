@@ -1,6 +1,5 @@
 import { usePosts } from "@/hooks/use-posts";
 import { PostItem } from "@/components/PostItem";
-import { AgeGate } from "@/components/AgeGate";
 import { useSEO } from "@/hooks/use-seo";
 import { Loader2 } from "lucide-react";
 
@@ -32,8 +31,6 @@ export default function Home() {
 
   return (
     <>
-      <AgeGate />
-      
       <main className="min-h-screen bg-white pb-32">
         <div className="max-w-4xl mx-auto">
           {visiblePosts.length === 0 ? (
