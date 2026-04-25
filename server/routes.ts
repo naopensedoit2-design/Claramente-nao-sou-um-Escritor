@@ -204,29 +204,28 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
 
       const prompt = `${systemPrompt}\n\n${isEmpty ? (title ? `Crie uma crônica original baseada no título: "${title}"` : "Crie uma crônica original.") : `Reescreva e melhore esta crônica seguindo seu estilo: ${content}`}`;
 
-      // Funçao de tentativa com múltiplos modelos (Practical Fallback)
+      // Funçao de tentativa com múltiplos modelos (Guerra Fallback)
       async function generateWithFallback(contentPayload: any) {
-        const models = ["gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-pro"];
+        const models = [
+          "gemini-1.5-flash", 
+          "gemini-1.5-flash-latest", 
+          "gemini-1.5-flash-001",
+          "gemini-1.5-flash-8b",
+          "gemini-pro",
+          "gemini-1.0-pro"
+        ];
         let lastError: any;
 
         for (const modelName of models) {
           try {
-            console.log(`Jarbas tentando modelo: ${modelName} (API v1)...`);
+            console.log(`Jarbas tentando modelo: ${modelName}...`);
+            // Tentamos v1 primeiro
             const model = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1" });
             const result = await model.generateContent(contentPayload);
             return result;
           } catch (err) {
-            console.warn(`Modelo ${modelName} falhou na v1:`, err.message);
-            // Segunda tentativa na v1beta caso a v1 não tenha o modelo
-            try {
-              console.log(`Jarbas tentando modelo: ${modelName} (API v1beta)...`);
-              const modelBeta = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1beta" });
-              const resultBeta = await modelBeta.generateContent(contentPayload);
-              return resultBeta;
-            } catch (errBeta) {
-              console.warn(`Modelo ${modelName} falhou na v1beta também.`);
-              lastError = errBeta;
-            }
+            console.warn(`Modelo ${modelName} falhou:`, err.message);
+            lastError = err;
           }
         }
         throw lastError;
@@ -234,22 +233,34 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
 
       let result;
       if (coverImageUrl && isEmpty) {
-        let fullImageUrl = coverImageUrl;
-        if (!coverImageUrl.startsWith('http')) {
-          const protocol = req.headers['x-forwarded-proto'] || 'http';
-          fullImageUrl = `${protocol}://${req.get('host')}${coverImageUrl}`;
-        }
-        
         try {
-          const imgRes = await fetch(fullImageUrl);
-          const imgBuffer = await imgRes.arrayBuffer();
+          let buffer: Buffer;
+          let contentType: string = "image/jpeg";
+
+          // Se for uma imagem do nosso sistema, lemos direto do banco (mais rápido e seguro)
+          if (coverImageUrl.startsWith('/objects/')) {
+            const assetId = coverImageUrl.split('/').pop() || "";
+            const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
+            if (asset) {
+              buffer = Buffer.from(asset.content, "base64");
+              contentType = asset.contentType;
+            } else {
+              throw new Error("Asset not found in DB");
+            }
+          } else {
+            // Se for URL externa, fazemos o fetch normal
+            const imgRes = await fetch(coverImageUrl);
+            const imgArrayBuffer = await imgRes.arrayBuffer();
+            buffer = Buffer.from(imgArrayBuffer);
+            contentType = imgRes.headers.get("content-type") || "image/jpeg";
+          }
           
           result = await generateWithFallback([
             { text: prompt },
             {
               inlineData: {
-                data: Buffer.from(imgBuffer).toString("base64"),
-                mimeType: imgRes.headers.get("content-type") || "image/jpeg",
+                data: buffer.toString("base64"),
+                mimeType: contentType,
               },
             },
           ]);
