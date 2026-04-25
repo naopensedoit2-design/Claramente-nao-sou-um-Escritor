@@ -4,6 +4,10 @@
   "outputDirectory": "dist/public",
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "/api/[...path]"
+    },
+    {
       "source": "/objects/(.*)",
       "destination": "/api/[...path]"
     },
