@@ -6,7 +6,7 @@ import { z } from "zod";
 import session from "express-session";
 import MemoryStore from "memorystore";
 import connectPgSimple from "connect-pg-simple";
-import { pool } from "./db";
+import { getPool } from "./db";
 import OpenAI from "openai";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import multer from "multer";
@@ -32,7 +32,7 @@ export async function registerRoutes(
   // 1. Session Middleware (Must be registered first)
   const isProduction = process.env.NODE_ENV === "production";
   const sessionStore = isProduction
-    ? new PgSession({ pool, createTableIfMissing: true })
+    ? new PgSession({ pool: getPool(), createTableIfMissing: true })
     : new SessionStore({ checkPeriod: 86400000 });
 
   app.use(

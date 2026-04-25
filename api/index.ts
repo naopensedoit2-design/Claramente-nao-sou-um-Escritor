@@ -29,17 +29,36 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Register all routes synchronously (seedDatabase is now fire-and-forget)
+// Register all routes synchronously
 const httpServer = createServer(app);
-registerRoutes(httpServer, app).catch((err) => {
-  console.error("Failed to register routes:", err);
-});
+let initError: any = null;
+
+try {
+  registerRoutes(httpServer, app).catch((err) => {
+    console.error("Failed to register routes async:", err);
+    initError = err;
+  });
+} catch (err) {
+  console.error("Failed to register routes sync:", err);
+  initError = err;
+}
 
 // Global error handler
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   const status = err.status || err.statusCode || 500;
   const message = err.message || "Internal Server Error";
-  res.status(status).json({ message });
+  res.status(status).json({ message, stack: err.stack });
 });
 
-export default app;
+// Wrapper to catch init errors and return them
+export default function (req: Request, res: Response, next: NextFunction) {
+  if (initError) {
+    return res.status(500).json({ 
+      error: "Initialization error", 
+      message: initError.message, 
+      stack: initError.stack 
+    });
+  }
+  return app(req, res, next);
+}
+
