@@ -204,42 +204,50 @@ PROIBIÇÕES:
 
 Retorne APENAS o texto final. Sem comentários ou metadados.`;
 
-      const prompt = `${systemPrompt}\n\n${isEmpty ? (title ? `Crie uma crônica original baseada no título: "${title}"` : "Crie uma crônica original.") : `Reescreva e melhore esta crônica seguindo seu estilo: ${content}`}`;
+      const promptText = `${systemPrompt}\n\n${isEmpty ? (title ? `Crie uma crônica original baseada no título: "${title}"` : "Crie uma crônica original.") : `Reescreva e melhore esta crônica seguindo seu estilo: ${content}`}`;
 
-      // Funçao de tentativa com múltiplos modelos (Guerra Fallback)
-      async function generateWithFallback(contentPayload: any) {
-        const models = [
-          "gemini-1.5-flash", 
-          "gemini-1.5-flash-latest", 
-          "gemini-1.5-flash-001",
-          "gemini-1.5-flash-8b",
-          "gemini-pro",
-          "gemini-1.0-pro"
+      async function callGeminiDirect(payloadContents: any) {
+        const key = process.env.AI_INTEGRATIONS_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+        if (!key) throw new Error("Chave Gemini não encontrada");
+
+        // Tentamos v1beta que é o mais comum para o Flash 1.5
+        const urls = [
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
+          `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${key}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${key}`
         ];
-        let lastError: any;
 
-        for (const modelName of models) {
+        let lastErr;
+        for (const url of urls) {
           try {
-            console.log(`Jarbas tentando modelo: ${modelName}...`);
-            // Tentamos v1 primeiro
-            const model = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1" });
-            const result = await model.generateContent(contentPayload);
-            return result;
+            console.log(`Jarbas tentando chamada direta: ${url.split('/models/')[1].split(':')[0]}...`);
+            const response = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ contents: payloadContents })
+            });
+
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`HTTP ${response.status}: ${errText}`);
+            }
+
+            const data = await response.json();
+            return data.candidates[0].content.parts[0].text;
           } catch (err) {
-            console.warn(`Modelo ${modelName} falhou:`, err.message);
-            lastError = err;
+            console.warn(`Tentativa falhou: ${err.message}`);
+            lastErr = err;
           }
         }
-        throw lastError;
+        throw lastErr;
       }
 
-      let result;
-      if (coverImageUrl && isEmpty) {
-        try {
+      let suggestion;
+      try {
+        if (coverImageUrl && isEmpty) {
           let buffer: Buffer;
           let contentType: string = "image/jpeg";
 
-          // Se for uma imagem do nosso sistema, lemos direto do banco (mais rápido e seguro)
           if (coverImageUrl.startsWith('/objects/')) {
             const assetId = coverImageUrl.split('/').pop() || "";
             const [asset] = await db.select().from(assets).where(eq(assets.id, assetId));
@@ -247,34 +255,37 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
               buffer = Buffer.from(asset.content, "base64");
               contentType = asset.contentType;
             } else {
-              throw new Error("Asset not found in DB");
+              throw new Error("Imagem não encontrada no banco");
             }
           } else {
-            // Se for URL externa, fazemos o fetch normal
             const imgRes = await fetch(coverImageUrl);
             const imgArrayBuffer = await imgRes.arrayBuffer();
             buffer = Buffer.from(imgArrayBuffer);
             contentType = imgRes.headers.get("content-type") || "image/jpeg";
           }
-          
-          result = await generateWithFallback([
-            { text: prompt },
-            {
-              inlineData: {
-                data: buffer.toString("base64"),
-                mimeType: contentType,
-              },
-            },
-          ]);
-        } catch (visionErr) {
-          console.warn("Jarbas falhou na visão, tentando apenas texto:", visionErr.message);
-          result = await generateWithFallback(prompt);
-        }
-      } else {
-        result = await generateWithFallback(prompt);
-      }
 
-      res.json({ suggestion: result.response.text() });
+          suggestion = await callGeminiDirect([{
+            parts: [
+              { text: promptText },
+              {
+                inlineData: {
+                  mimeType: contentType,
+                  data: buffer.toString("base64")
+                }
+              }
+            ]
+          }]);
+        } else {
+          suggestion = await callGeminiDirect([{
+            parts: [{ text: promptText }]
+          }]);
+        }
+
+        res.json({ suggestion });
+      } catch (err) {
+        console.error("Erro final do Jarbas:", err.message);
+        res.status(500).json({ message: "O Jarbas teve um problema de conexão com o Google. Verifique sua chave API." });
+      }
     } catch (err) {
       console.error("AI Suggestion error:", err);
       res.status(500).json({ message: "Failed to generate AI suggestion" });
