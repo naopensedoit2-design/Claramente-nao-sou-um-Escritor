@@ -211,13 +211,22 @@ Retorne APENAS o texto final. Sem comentários ou metadados.`;
 
         for (const modelName of models) {
           try {
-            console.log(`Jarbas tentando modelo: ${modelName}...`);
-            const model = genAI.getGenerativeModel({ model: modelName });
+            console.log(`Jarbas tentando modelo: ${modelName} (API v1)...`);
+            const model = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1" });
             const result = await model.generateContent(contentPayload);
             return result;
           } catch (err) {
-            console.warn(`Modelo ${modelName} falhou:`, err.message);
-            lastError = err;
+            console.warn(`Modelo ${modelName} falhou na v1:`, err.message);
+            // Segunda tentativa na v1beta caso a v1 não tenha o modelo
+            try {
+              console.log(`Jarbas tentando modelo: ${modelName} (API v1beta)...`);
+              const modelBeta = genAI.getGenerativeModel({ model: modelName }, { apiVersion: "v1beta" });
+              const resultBeta = await modelBeta.generateContent(contentPayload);
+              return resultBeta;
+            } catch (errBeta) {
+              console.warn(`Modelo ${modelName} falhou na v1beta também.`);
+              lastError = errBeta;
+            }
           }
         }
         throw lastError;
