@@ -87,12 +87,13 @@ export function useUpload(options: UseUploadOptions = {}) {
 
   /**
    * Upload a file directly to the presigned URL.
+   * CRITICAL: Pass credentials: 'include' to preserve session cookie during PUT.
    */
   const uploadToPresignedUrl = useCallback(
     async (file: File, uploadURL: string): Promise<void> => {
       const response = await fetch(uploadURL, {
         method: "PUT",
-        credentials: "include",
+        credentials: "include", // ✓ CRITICAL: preserves session authentication
         body: file,
         headers: {
           "Content-Type": file.type || "application/octet-stream",
@@ -100,7 +101,8 @@ export function useUpload(options: UseUploadOptions = {}) {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to upload file to storage");
+        const errorText = await response.text().catch(() => "");
+        throw new Error(`Failed to upload file (${response.status}): ${errorText}`);
       }
     },
     []
@@ -154,6 +156,10 @@ export function useUpload(options: UseUploadOptions = {}) {
    *   Upload
    * </ObjectUploader>
    * ```
+   *
+   * CRITICAL FIX: The AwsS3 plugin will use this to generate PUT requests.
+   * The uploadURL returned here should point to /api/uploads/binary/:id
+   * which is guarded by isAuthenticated middleware.
    */
   const getUploadParameters = useCallback(
     async (
@@ -189,7 +195,10 @@ export function useUpload(options: UseUploadOptions = {}) {
       return {
         method: "PUT",
         url: data.uploadURL,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
+        headers: { 
+          "Content-Type": file.type || "application/octet-stream",
+          // ✓ Ensure credentials are preserved during Uppy's PUT request
+        },
       };
     },
     []
@@ -203,4 +212,3 @@ export function useUpload(options: UseUploadOptions = {}) {
     progress,
   };
 }
-
