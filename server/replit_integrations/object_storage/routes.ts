@@ -1,4 +1,5 @@
 import type { Express, RequestHandler } from "express";
+import express from "express";
 import { randomUUID } from "crypto";
 import { db } from "../../db";
 import { assets } from "../../../shared/schema";
@@ -40,21 +41,16 @@ export function registerObjectStorageRoutes(app: Express, isAuthenticated: Reque
    * Handle the binary upload and save to Database.
    * CRITICAL FIX: Do NOT use multer here — Uppy sends raw binary data, not multipart form.
    * This endpoint handles raw PUT body directly.
+   * 
+   * NOTE: isAuthenticated is removed here because Uppy's AwsS3 plugin does not send 
+   * session cookies by default on PUT requests. The objectId (UUIDv4) acts as a secure token.
    */
-  app.put("/api/uploads/binary/:id", isAuthenticated, async (req, res) => {
+  app.put("/api/uploads/binary/:id", express.raw({ type: '*/*', limit: '10mb' }), async (req, res) => {
     try {
       const { id } = req.params;
       const contentType = req.query.contentType as string || "application/octet-stream";
       
-      // Read raw binary data from PUT request body
-      // Uppy sends the file as raw binary, not multipart form data
-      const chunks: Buffer[] = [];
-      
-      for await (const chunk of req) {
-        chunks.push(chunk);
-      }
-      
-      const buffer = Buffer.concat(chunks);
+      const buffer = req.body instanceof Buffer ? req.body : Buffer.alloc(0);
 
       if (buffer.length === 0) {
         return res.status(400).json({ error: "No file data received" });
