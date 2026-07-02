@@ -3,11 +3,6 @@ import { randomUUID } from "crypto";
 import { db } from "../../db";
 import { assets } from "../../../shared/schema";
 import { eq } from "drizzle-orm";
-import multer from "multer";
-
-const upload = multer({ 
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit for DB storage
-});
 
 export function registerObjectStorageRoutes(app: Express, isAuthenticated: RequestHandler): void {
   /**
@@ -43,26 +38,29 @@ export function registerObjectStorageRoutes(app: Express, isAuthenticated: Reque
 
   /**
    * Handle the binary upload and save to Database.
-   * Uppy uses PUT by default for the presigned URL flow.
-   * Requires an authenticated admin session.
+   * CRITICAL FIX: Do NOT use multer here — Uppy sends raw binary data, not multipart form.
+   * This endpoint handles raw PUT body directly.
    */
-  app.put("/api/uploads/binary/:id", isAuthenticated, upload.single("file"), async (req, res) => {
+  app.put("/api/uploads/binary/:id", isAuthenticated, async (req, res) => {
     try {
       const { id } = req.params;
       const contentType = req.query.contentType as string || "application/octet-stream";
       
-      // If multer didn't pick it up as 'file' (standard PUT), we read raw body
-      let buffer: Buffer;
-      if (req.file) {
-        buffer = req.file.buffer;
-      } else {
-        // Handle raw PUT body
-        const chunks: any[] = [];
-        for await (const chunk of req) {
-          chunks.push(chunk);
-        }
-        buffer = Buffer.concat(chunks);
+      // Read raw binary data from PUT request body
+      // Uppy sends the file as raw binary, not multipart form data
+      const chunks: Buffer[] = [];
+      
+      for await (const chunk of req) {
+        chunks.push(chunk);
       }
+      
+      const buffer = Buffer.concat(chunks);
+
+      if (buffer.length === 0) {
+        return res.status(400).json({ error: "No file data received" });
+      }
+
+      console.log(`[Upload] Saving file ${id}, size: ${buffer.length} bytes, type: ${contentType}`);
 
       const base64Content = buffer.toString("base64");
 
@@ -72,6 +70,7 @@ export function registerObjectStorageRoutes(app: Express, isAuthenticated: Reque
         content: base64Content,
       });
 
+      console.log(`[Upload] File saved successfully: ${id}`);
       res.json({ success: true, objectPath: `/objects/${id}` });
     } catch (error) {
       console.error("Error saving binary upload:", error);
