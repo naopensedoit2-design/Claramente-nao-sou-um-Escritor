@@ -3,6 +3,12 @@ import express, { type Request, type Response, type NextFunction } from "express
 import { createServer } from "http";
 import { registerRoutes } from "../server/routes";
 
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
 const app = express();
 app.set("trust proxy", 1);
 
