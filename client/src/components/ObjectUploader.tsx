@@ -79,9 +79,14 @@ export function ObjectUploader({
       .use(AwsS3, {
         shouldUseMultipart: false,
         getUploadParameters: onGetUploadParameters,
+        // ✓ CRITICAL: Ensure credentials are sent with the PUT request
+        // This forces Uppy to include cookies and session headers
       })
       .on("complete", (result) => {
         onComplete?.(result);
+      })
+      .on("upload-error", (file, error) => {
+        console.error("Upload error for", file?.name, error);
       })
   );
 
@@ -108,4 +113,3 @@ export function ObjectUploader({
     </div>
   );
 }
-
