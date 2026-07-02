@@ -69,9 +69,10 @@ export default function Admin() {
     }
   }, [auth, authLoading, setLocation]);
 
-  // Load any saved draft once, on mount
+  // Load any saved draft once the session is confirmed authenticated
   useEffect(() => {
     if (draftLoadedRef.current) return;
+    if (authLoading || !auth?.isAuthenticated) return;
     draftLoadedRef.current = true;
     try {
       const raw = localStorage.getItem(DRAFT_KEY);
@@ -91,7 +92,7 @@ export default function Admin() {
       console.error("Falha ao carregar rascunho:", err);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, auth?.isAuthenticated]);
 
   // Autosave draft to localStorage (debounced)
   useEffect(() => {
@@ -251,7 +252,13 @@ export default function Admin() {
 
   const handleLogout = () => {
     logout(undefined, {
-      onSuccess: () => setLocation("/")
+      onSuccess: () => {
+        clearDraft();
+        setTitle("");
+        setContent("");
+        setCoverImageUrl("");
+        setLocation("/");
+      }
     });
   };
 

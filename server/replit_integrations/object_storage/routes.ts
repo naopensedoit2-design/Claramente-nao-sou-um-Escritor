@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, RequestHandler } from "express";
 import { randomUUID } from "crypto";
 import { db } from "../../db";
 import { assets } from "../../../shared/schema";
@@ -9,12 +9,13 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit for DB storage
 });
 
-export function registerObjectStorageRoutes(app: Express): void {
+export function registerObjectStorageRoutes(app: Express, isAuthenticated: RequestHandler): void {
   /**
    * Request a URL for file upload.
    * On Vercel, we return a local API URL that will handle the binary upload.
+   * Requires an authenticated admin session — this issues a writable URL.
    */
-  app.post("/api/uploads/request-url", async (req, res) => {
+  app.post("/api/uploads/request-url", isAuthenticated, async (req, res) => {
     try {
       const { name, size, contentType } = req.body;
 
@@ -43,8 +44,9 @@ export function registerObjectStorageRoutes(app: Express): void {
   /**
    * Handle the binary upload and save to Database.
    * Uppy uses PUT by default for the presigned URL flow.
+   * Requires an authenticated admin session.
    */
-  app.put("/api/uploads/binary/:id", upload.single("file"), async (req, res) => {
+  app.put("/api/uploads/binary/:id", isAuthenticated, upload.single("file"), async (req, res) => {
     try {
       const { id } = req.params;
       const contentType = req.query.contentType as string || "application/octet-stream";

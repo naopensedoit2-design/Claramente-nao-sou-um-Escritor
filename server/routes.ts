@@ -13,6 +13,8 @@ import OpenAI from "openai";
 import { registerObjectStorageRoutes } from "./replit_integrations/object_storage";
 import multer from "multer";
 import fs from "fs";
+import crypto from "crypto";
+import rateLimit from "express-rate-limit";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const openai = new OpenAI({
@@ -25,6 +27,41 @@ const geminiModel = genAI.getGenerativeModel({ model: "gemini-pro" });
 const SessionStore = MemoryStore(session);
 const PgSession = connectPgSimple(session);
 const upload = multer({ dest: "/tmp/uploads/" });
+
+// SESSION_SECRET must be set in the environment (e.g. Vercel project settings).
+// We deliberately do NOT fall back to a hardcoded value: a known/guessable
+// secret lets an attacker forge a valid "isAuthenticated" session cookie
+// without ever knowing the admin password. If it's missing we generate a
+// random one per server instance so the app still runs, but this means
+// existing sessions are invalidated on cold start until the env var is set.
+const SESSION_SECRET =
+  process.env.SESSION_SECRET ||
+  (() => {
+    console.error(
+      "[SECURITY] SESSION_SECRET não está definido no ambiente. Usando um valor aleatório temporário — configure SESSION_SECRET no Vercel."
+    );
+    return crypto.randomBytes(32).toString("hex");
+  })();
+
+// Login rate limiting: slows down password brute-forcing.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Muitas tentativas. Tente novamente em alguns minutos." },
+});
+
+function timingSafeEquals(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    // Still run a comparison of equal length to avoid leaking length via timing.
+    crypto.timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -39,14 +76,16 @@ export async function registerRoutes(
   app.use(
     session({
       cookie: {
-        maxAge: 86400000,
+        maxAge: 2 * 60 * 60 * 1000, // 2 hours
         secure: isProduction,
         sameSite: "lax",
+        httpOnly: true,
       },
       store: sessionStore,
       resave: false,
       saveUninitialized: false,
-      secret: process.env.SESSION_SECRET || "secret_key",
+      rolling: true, // sliding expiration: stays logged in while active, expires after 2h idle
+      secret: SESSION_SECRET,
     })
   );
 
@@ -60,7 +99,7 @@ export async function registerRoutes(
   };
 
   // 3. Integrations
-  registerObjectStorageRoutes(app);
+  registerObjectStorageRoutes(app, isAuthenticated);
 
   // 4. Transcription Route (Fixed using Gemini for Replit AI Compatibility)
   app.post("/api/ai/transcribe", isAuthenticated, upload.single("audio"), async (req, res) => {
@@ -140,13 +179,18 @@ export async function registerRoutes(
     res.json({ isAuthenticated: !!(req.session as any).isAuthenticated });
   });
 
-  app.post(api.auth.login.path, (req, res) => {
+  app.post(api.auth.login.path, loginLimiter, (req, res) => {
     const { password } = req.body;
-    const adminPassword = process.env.ADMIN_PASSWORD || "admin123";
-    
-    console.log(`Login attempt with password: ${password === adminPassword ? "CORRECT" : "INCORRECT"}`);
+    const adminPassword = process.env.ADMIN_PASSWORD;
 
-    if (password === adminPassword) {
+    if (!adminPassword) {
+      console.error(
+        "[SECURITY] ADMIN_PASSWORD não está definido no ambiente. Login recusado até que a variável seja configurada no Vercel."
+      );
+      return res.status(500).json({ message: "Configuração do servidor incompleta" });
+    }
+
+    if (typeof password === "string" && timingSafeEquals(password, adminPassword)) {
       (req.session as any).isAuthenticated = true;
       res.json({ success: true });
     } else {
