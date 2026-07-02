@@ -58,12 +58,70 @@ export default function Admin() {
   const baseContentRef = useRef<string>("");
   const committedRef = useRef<string>("");
 
+  const DRAFT_KEY = "escritor_draft_v1";
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const draftLoadedRef = useRef(false);
+
   // Protected route logic
   useEffect(() => {
     if (!authLoading && !auth?.isAuthenticated) {
       setLocation("/login");
     }
   }, [auth, authLoading, setLocation]);
+
+  // Load any saved draft once, on mount
+  useEffect(() => {
+    if (draftLoadedRef.current) return;
+    draftLoadedRef.current = true;
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft && (draft.title || draft.content || draft.coverImageUrl)) {
+        setTitle(draft.title || "");
+        setContent(draft.content || "");
+        setCoverImageUrl(draft.coverImageUrl || "");
+        setLastSavedAt(draft.savedAt ? new Date(draft.savedAt) : null);
+        toast({
+          title: "Rascunho recuperado",
+          description: "Um texto não publicado foi restaurado automaticamente.",
+        });
+      }
+    } catch (err) {
+      console.error("Falha ao carregar rascunho:", err);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Autosave draft to localStorage (debounced)
+  useEffect(() => {
+    if (!draftLoadedRef.current) return;
+    if (!title && !content && !coverImageUrl) return;
+
+    const timeout = setTimeout(() => {
+      try {
+        const now = new Date();
+        localStorage.setItem(
+          DRAFT_KEY,
+          JSON.stringify({ title, content, coverImageUrl, savedAt: now.toISOString() })
+        );
+        setLastSavedAt(now);
+      } catch (err) {
+        console.error("Falha ao salvar rascunho:", err);
+      }
+    }, 800);
+
+    return () => clearTimeout(timeout);
+  }, [title, content, coverImageUrl]);
+
+  const clearDraft = () => {
+    try {
+      localStorage.removeItem(DRAFT_KEY);
+    } catch (err) {
+      console.error("Falha ao limpar rascunho:", err);
+    }
+    setLastSavedAt(null);
+  };
 
   const startRecording = () => {
     const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -172,6 +230,7 @@ export default function Admin() {
           setTitle("");
           setContent("");
           setCoverImageUrl("");
+          clearDraft();
           setSuccess(true);
           setTimeout(() => setSuccess(false), 3000);
           toast({
@@ -255,8 +314,14 @@ export default function Admin() {
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   placeholder="Comece a escrever..."
-                  className="w-full min-h-[30vh] text-lg font-serif leading-relaxed placeholder:text-gray-100 border-none focus:ring-0 p-0 bg-transparent resize-none"
+                  className="w-full min-h-[30vh] text-lg font-serif leading-relaxed placeholder:text-gray-100 border-none focus:ring-0 p-0 bg-transparent resize-y"
+                  style={{ resize: "vertical" }}
                 />
+                {lastSavedAt && (
+                  <span className="absolute -top-5 right-0 text-[9px] font-sans text-gray-300 uppercase tracking-widest">
+                    Rascunho salvo às {lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                )}
                 <div className="absolute bottom-4 right-4 flex items-center gap-4">
                   <button
                     type="button"
